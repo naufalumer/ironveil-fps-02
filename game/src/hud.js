@@ -1,10 +1,11 @@
-// The DOM HUD: crosshair, hit marker, health, ammo, timer, score, money,
-// killfeed, charge status, buy menu and the overlay panels. It never touches
-// the simulation; main.js pushes numbers in and reads the play callback out.
-// Every setter is cheap and cached: unchanged values never touch the DOM.
-import { WEAPON_DEFS } from './weapons.js';
+// The DOM HUD: crosshair, hit marker, health, ammo, timer, score,
+// money, killfeed, charge status, buy menu and the overlay panels. It
+// never touches the simulation; main.js pushes numbers in and reads the
+// play callback out. Every setter is cheap and cached: unchanged values
+// never touch the DOM.
+import { GUNBOOK } from './weapons.js';
 
-const COPY = {
+const PANELS = {
   start: {
     title: 'IRONVEIL',
     copy: 'Foundry breach. Plant the charge at A or B, or wipe the defenders. First to 3 rounds takes the foundry.',
@@ -14,175 +15,192 @@ const COPY = {
   dead: { title: 'You are down', copy: 'Your squad fights on. Next round starts soon.', action: 'Spectate' },
 };
 
-const BUY_ITEMS = [
-  { key: '1', id: 'smg', label: 'Ripper SMG' },
-  { key: '2', id: 'rifle', label: 'Anvil Rifle' },
-  { key: '3', id: 'marksman', label: 'Longshot DMR' },
-  { key: '4', id: 'smoke', label: 'Smoke grenade' },
-  { key: '5', id: 'flash', label: 'Flash grenade' },
+const SHOP_ROWS = [
+  { key: '1', id: 'smg' },
+  { key: '2', id: 'rifle' },
+  { key: '3', id: 'marksman' },
+  { key: '4', id: 'smoke', label: 'Smoke grenade', price: 250 },
+  { key: '5', id: 'flash', label: 'Flash grenade', price: 150 },
 ];
 
-export function createHud() {
+export function makeHud() {
   const $ = (id) => document.getElementById(id);
-  const overlay = $('overlay');
-  const title = $('overlay-title');
-  const copy = $('overlay-copy');
-  const play = $('play');
-  const healthFill = $('health-fill');
-  const healthNum = $('health-num');
-  const ammoMag = $('ammo-mag');
-  const ammoReserve = $('ammo-reserve');
-  const weaponName = $('weapon-name');
-  const moneyValue = $('money-value');
-  const timerValue = $('timer-value');
-  const scoreAtk = $('score-atk');
-  const scoreDef = $('score-def');
-  const roundValue = $('round-value');
-  const killfeed = $('killfeed');
-  const hitmarker = $('hitmarker');
-  const crosshair = $('crosshair');
-  const bombStatus = $('bomb-status');
-  const buyMenu = $('buy-menu');
-  const buyList = $('buy-list');
-  const banner = $('banner');
-  const bannerTitle = $('banner-title');
-  const bannerSub = $('banner-sub');
-  const hint = $('hint');
-  const grenadeLine = $('grenades');
-  const vignette = $('damage-vignette');
-  const chargeCarry = $('charge-carry');
+  const veil = $('veil');
+  const veilTitle = $('veil-title');
+  const veilCopy = $('veil-copy');
+  const playBtn = $('play-btn');
+  const hpFill = $('hp-fill');
+  const hpNum = $('hp-num');
+  const magNum = $('mag-num');
+  const spareNum = $('spare-num');
+  const gunName = $('gun-name');
+  const cashNum = $('cash-num');
+  const clockNum = $('clock-num');
+  const scoreA = $('score-a');
+  const scoreD = $('score-d');
+  const roundNum = $('round-num');
+  const feed = $('feed');
+  const hitmark = $('hitmark');
+  const sight = $('sight');
+  const chargeStatus = $('charge-status');
+  const shop = $('shop');
+  const shopList = $('shop-list');
+  const flag = $('flag');
+  const flagTitle = $('flag-title');
+  const flagSub = $('flag-sub');
+  const clue = $('clue');
+  const kitLine = $('kit-line');
+  const hurtVignette = $('hurt-vignette');
+  const carrying = $('carrying');
 
   let last = {};
   let hitTimer = 0;
-  let bannerTimer = 0;
+  let flagTimer = 0;
 
-  function setText(el, key, value) {
+  function putText(el, key, value) {
     if (last[key] === value) return;
     last[key] = value;
     el.textContent = value;
   }
 
-  // Build the buy menu rows once; update prices/owned state per render.
-  const buyRows = {};
-  for (const item of BUY_ITEMS) {
+  // Build the shop rows once; update prices/owned state per render.
+  const shopRows = {};
+  for (const item of SHOP_ROWS) {
+    const spec = GUNBOOK[item.id];
+    const label = item.label ?? spec.label;
+    const price = item.price ?? spec.cost;
     const li = document.createElement('li');
-    const price = item.id === 'smoke' ? 250 : item.id === 'flash' ? 150 : WEAPON_DEFS[item.id].price;
-    li.innerHTML = `<kbd>${item.key}</kbd><span>${item.label}</span><b>$${price}</b>`;
-    buyList.appendChild(li);
-    buyRows[item.id] = { li, price };
+    li.innerHTML = `<kbd>${item.key}</kbd><span>${label}</span><b>$${price}</b>`;
+    shopList.appendChild(li);
+    shopRows[item.id] = { li, price };
   }
 
   return {
-    setHealth(value) {
+    showHp(value) {
       const v = Math.max(0, Math.round(value));
-      if (last.health === v) return;
-      last.health = v;
-      healthFill.style.width = `${v}%`;
-      healthFill.classList.toggle('low', v <= 30);
-      healthNum.textContent = String(v);
-      vignette.style.opacity = v <= 30 ? String((30 - v) / 30 * 0.55) : '0';
+      if (last.hp === v) return;
+      last.hp = v;
+      hpFill.style.width = `${v}%`;
+      hpFill.classList.toggle('critical', v <= 30);
+      hpNum.textContent = String(v);
+      hurtVignette.style.opacity = v <= 30 ? String(((30 - v) / 30) * 0.55) : '0';
     },
-    setAmmo(mag, reserve, weaponKey) {
-      setText(ammoMag, 'mag', String(mag));
-      setText(ammoReserve, 'reserve', `/ ${reserve}`);
-      setText(weaponName, 'weapon', WEAPON_DEFS[weaponKey].name);
-      $('ammo').classList.toggle('empty', mag === 0);
+    showLoads(clip, spare, gunKey) {
+      putText(magNum, 'clip', String(clip));
+      putText(spareNum, 'spare', `/ ${spare}`);
+      putText(gunName, 'gun', GUNBOOK[gunKey].label);
+      $('ammo-box').classList.toggle('dry', clip === 0);
     },
-    setMoney(value) {
-      setText(moneyValue, 'money', `$${value}`);
+    showCash(value) {
+      putText(cashNum, 'cash', `$${value}`);
     },
-    setGrenades(smoke, flash, selected) {
-      setText(grenadeLine, 'grenades', `Smoke ${smoke} · Flash ${flash} — [4]/[5] select, [G] throw (${selected})`);
+    showKit(smokes, flashes, chosen) {
+      putText(
+        kitLine,
+        'kit',
+        `Smoke ${smokes} · Flash ${flashes} — [4]/[5] select, [G] throw (${chosen})`,
+      );
     },
-    setTimer(seconds, phase) {
+    showClock(seconds, stage) {
       const s = Math.max(0, Math.ceil(seconds));
-      const text = phase === 'BUY' ? `BUY ${s}` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
-      setText(timerValue, 'timer', text);
-      $('timer').classList.toggle('buy', phase === 'BUY');
-      $('timer').classList.toggle('urgent', phase !== 'BUY' && s <= 10);
+      const text =
+        stage === 'BUY'
+          ? `BUY ${s}`
+          : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+      putText(clockNum, 'clock', text);
+      $('clock').classList.toggle('shopping', stage === 'BUY');
+      $('clock').classList.toggle('late', stage !== 'BUY' && s <= 10);
     },
-    setScore(atk, def, round) {
-      setText(scoreAtk, 'atk', String(atk));
-      setText(scoreDef, 'def', String(def));
-      setText(roundValue, 'round', `ROUND ${round} / 5`);
+    showScore(atk, def, round) {
+      putText(scoreA, 'atk', String(atk));
+      putText(scoreD, 'def', String(def));
+      putText(roundNum, 'round', `ROUND ${round} / 5`);
     },
-    setCrosshairGap(px) {
+    setSightGap(px) {
       const v = Math.round(px);
       if (last.gap === v) return;
       last.gap = v;
-      crosshair.style.setProperty('--gap', `${v}px`);
+      sight.style.setProperty('--gap', `${v}px`);
     },
-    hitMarker(killed, holdMs = 90) {
-      hitmarker.classList.add('on');
-      hitmarker.classList.toggle('kill', killed);
+    markHit(killed, holdMs = 90) {
+      hitmark.classList.add('lit');
+      hitmark.classList.toggle('fatal', killed);
       clearTimeout(hitTimer);
-      hitTimer = setTimeout(() => hitmarker.classList.remove('on', 'kill'), holdMs);
+      hitTimer = setTimeout(
+        () => hitmark.classList.remove('lit', 'fatal'),
+        holdMs,
+      );
     },
-    killfeed(killer, victim, headshot, killerTeam) {
+    addKill(killer, victim, headshot, killerTeam) {
       const row = document.createElement('div');
-      row.className = `feed-row ${killerTeam}`;
+      row.className = `feed-line ${killerTeam}`;
       row.innerHTML = `<b>${killer}</b> ${headshot ? '◎' : '—'} <b>${victim}</b>`;
-      killfeed.prepend(row);
-      while (killfeed.children.length > 5) killfeed.removeChild(killfeed.lastChild);
+      feed.prepend(row);
+      while (feed.children.length > 5) feed.removeChild(feed.lastChild);
       setTimeout(() => row.remove(), 6000);
     },
-    damageFrom(angleDeg) {
+    hurtFrom(angleDeg) {
       const arc = document.createElement('div');
-      arc.className = 'dmg-arc';
+      arc.className = 'hurt-arc';
       arc.style.transform = `rotate(${angleDeg}deg)`;
-      $('damage-dir').appendChild(arc);
+      $('hurt-dir').appendChild(arc);
       setTimeout(() => arc.remove(), 900);
     },
-    setBomb(text, kind) {
-      setText(bombStatus, 'bomb', text);
-      bombStatus.className = kind ? `show ${kind}` : '';
+    showCharge(text, kind) {
+      putText(chargeStatus, 'charge', text);
+      chargeStatus.className = kind ? `open ${kind}` : '';
     },
-    setChargeCarry(show) {
-      chargeCarry.classList.toggle('show', show);
+    showCarrying(show) {
+      carrying.classList.toggle('open', show);
     },
-    setHint(text) {
-      setText(hint, 'hint', text);
-      hint.classList.toggle('show', !!text);
+    showClue(text) {
+      putText(clue, 'clue', text);
+      clue.classList.toggle('open', !!text);
     },
-    showBuyMenu(show, money, owned) {
-      buyMenu.classList.toggle('show', show);
+    showShop(show, money, unlocked) {
+      shop.classList.toggle('open', show);
       if (!show) return;
-      for (const item of BUY_ITEMS) {
-        const row = buyRows[item.id];
+      for (const item of SHOP_ROWS) {
+        const row = shopRows[item.id];
         const afford = money >= row.price;
-        const has = item.id === 'smoke' || item.id === 'flash' ? false : !!owned[item.id];
-        row.li.classList.toggle('cant', !afford);
-        row.li.classList.toggle('owned', has);
+        const has =
+          item.id === 'smoke' || item.id === 'flash'
+            ? false
+            : !!unlocked[item.id];
+        row.li.classList.toggle('poor', !afford);
+        row.li.classList.toggle('have', has);
       }
     },
-    showBanner(titleText, subText, kind, ms = 2600) {
-      bannerTitle.textContent = titleText;
-      bannerSub.textContent = subText;
-      banner.className = `show ${kind || ''}`;
-      clearTimeout(bannerTimer);
-      bannerTimer = setTimeout(() => { banner.className = ''; }, ms);
+    showFlag(titleText, subText, kind, ms = 2600) {
+      flagTitle.textContent = titleText;
+      flagSub.textContent = subText;
+      flag.className = `open ${kind || ''}`;
+      clearTimeout(flagTimer);
+      flagTimer = setTimeout(() => {
+        flag.className = '';
+      }, ms);
     },
-    showOverlay(mode, data) {
-      const text = COPY[mode];
+    showVeil(mode, data) {
+      const text = PANELS[mode];
       if (!text) return;
-      title.textContent = text.title;
-      copy.textContent = mode === 'dead' && data ? `${text.copy}` : text.copy;
-      play.textContent = text.action;
-      overlay.hidden = false;
-      play.focus();
+      veilTitle.textContent = text.title;
+      veilCopy.textContent = mode === 'dead' && data ? `${text.copy}` : text.copy;
+      playBtn.textContent = text.action;
+      veil.hidden = false;
+      playBtn.focus();
     },
-    showMatchOverlay(won, atk, def) {
-      title.textContent = won ? 'FOUNDRY TAKEN' : 'FOUNDRY LOST';
-      copy.textContent = `Final score — Attackers ${atk} · Defenders ${def}. ${won ? 'The charge did its work.' : 'The defenders held the foundry.'}`;
-      play.textContent = 'Play again';
-      overlay.hidden = false;
-      play.focus();
+    showMatchVeil(won, atk, def) {
+      veilTitle.textContent = won ? 'FOUNDRY TAKEN' : 'FOUNDRY LOST';
+      veilCopy.textContent = `Final score — Attackers ${atk} · Defenders ${def}. ${won ? 'The charge did its work.' : 'The defenders held the foundry.'}`;
+      playBtn.textContent = 'Play again';
+      veil.hidden = false;
+      playBtn.focus();
     },
-    hideOverlay() {
-      overlay.hidden = true;
+    hideVeil() {
+      veil.hidden = true;
     },
-    onPlay(handler) {
-      play.addEventListener('click', handler);
+    onPlayClick(handler) {
+      playBtn.addEventListener('click', handler);
     },
   };
 }

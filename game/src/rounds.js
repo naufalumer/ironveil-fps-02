@@ -1,125 +1,139 @@
 // Rounds and the economy: the one place that decides what a round is.
-// Phases: BUY (15 s, buy menu open) -> LIVE (100 s) -> PLANTED (35 s fuse,
-// driven by bomb.js) -> END (5 s banner) -> next round. First to 3, max 5.
-// Money: start $900, kill +$250, round win +$300, plant +$250, loss +$150.
-// A round ends on elimination, detonation, defusal, or the clock (defenders
-// win on time when nothing is planted). The match ends at 3–0, 3–1, 3–2, or
-// after round 5 on score.
-import { WEAPON_DEFS } from './weapons.js';
+// Stages: BUY (15 s, shop open) -> LIVE (100 s) -> PLANTED (35 s fuse,
+// driven by the charge module) -> END (5 s banner) -> next round. First
+// to 3, max 5. Money: start $900, kill +$250, round win +$300, plant
+// +$250, loss +$150. A round ends on elimination, detonation, defusal,
+// or the clock (defenders win on time when nothing is planted). The
+// match ends at 3–0, 3–1, 3–2, or after round 5 on score.
+import { GUNBOOK } from './weapons.js';
 
-export const BUY_SECONDS = 15;
-export const ROUND_SECONDS = 100;
-export const END_SECONDS = 5;
-export const WIN_ROUNDS = 3;
-export const MAX_ROUNDS = 5;
-const KILL_REWARD = 250;
-const WIN_REWARD = 300;
-const PLANT_REWARD = 250;
-const LOSS_REWARD = 150;
+export const BUY_TIME = 15;
+export const ROUND_TIME = 100;
+export const END_TIME = 5;
+export const ROUNDS_TO_WIN = 3;
+export const ROUND_CAP = 5;
+const KILL_PAY = 250;
+const WIN_PAY = 300;
+const PLANT_PAY = 250;
+const LOSS_PAY = 150;
 
-export function createRounds() {
+const SHOP_KEYS = {
+  Digit1: 'smg',
+  Digit2: 'rifle',
+  Digit3: 'marksman',
+  Digit4: 'smoke',
+  Digit5: 'flash',
+};
+const GRENADE_PRICES = { smoke: 250, flash: 150 };
+
+export function makeMatch() {
   const state = {
-    phase: 'BUY', // BUY | LIVE | PLANTED | END | MATCH
-    phaseLeft: BUY_SECONDS,
-    round: 1,
-    scoreAtk: 0,
-    scoreDef: 0,
-    money: 900,
-    kills: 0,
-    deaths: 0,
-    plants: 0,
-    endReason: '',
-    matchWinner: null,
+    stage: 'BUY', // BUY | LIVE | PLANTED | END | MATCH
+    stageLeft: BUY_TIME,
+    roundNo: 1,
+    atkScore: 0,
+    defScore: 0,
+    cash: 900,
+    killCount: 0,
+    deathCount: 0,
+    plantCount: 0,
+    endNote: '',
+    matchVictor: null,
   };
 
   function award(amount) {
-    state.money += amount;
+    state.cash += amount;
   }
 
   return {
     state,
-    startRound() {
-      state.phase = 'BUY';
-      state.phaseLeft = BUY_SECONDS;
-      state.endReason = '';
+    openRound() {
+      state.stage = 'BUY';
+      state.stageLeft = BUY_TIME;
+      state.endNote = '';
     },
-    // Tick the clock. Returns an event string when the phase must change:
-    // 'buy-over' | 'time-up' | null. The fuse is ticked by bomb.js, not here.
-    tick(dt) {
-      if (state.phase === 'END' || state.phase === 'MATCH') {
-        state.phaseLeft -= dt;
-        if (state.phaseLeft <= 0 && state.phase === 'END') return 'end-over';
+    // Tick the clock. Returns an event string when the stage must change:
+    // 'buy-over' | 'time-up' | 'end-over' | null. The fuse is ticked by
+    // the charge module, not here.
+    advance(dt) {
+      if (state.stage === 'END' || state.stage === 'MATCH') {
+        state.stageLeft -= dt;
+        if (state.stageLeft <= 0 && state.stage === 'END') return 'end-over';
         return null;
       }
-      state.phaseLeft -= dt;
-      if (state.phaseLeft <= 0) {
-        if (state.phase === 'BUY') {
-          state.phase = 'LIVE';
-          state.phaseLeft = ROUND_SECONDS;
+      state.stageLeft -= dt;
+      if (state.stageLeft <= 0) {
+        if (state.stage === 'BUY') {
+          state.stage = 'LIVE';
+          state.stageLeft = ROUND_TIME;
           return 'buy-over';
         }
-        if (state.phase === 'LIVE') return 'time-up';
+        if (state.stage === 'LIVE') return 'time-up';
       }
       return null;
     },
-    onPlant() {
-      state.phase = 'PLANTED';
-      state.phaseLeft = 35;
-      state.plants += 1;
-      award(PLANT_REWARD);
+    notePlant() {
+      state.stage = 'PLANTED';
+      state.stageLeft = 35;
+      state.plantCount += 1;
+      award(PLANT_PAY);
     },
-    onKill(headshot) {
-      state.kills += 1;
-      award(KILL_REWARD);
+    noteKill() {
+      state.killCount += 1;
+      award(KILL_PAY);
     },
-    onDeath() {
-      state.deaths += 1;
+    noteDeath() {
+      state.deathCount += 1;
     },
     // End the round for one side. Returns { winner, reason, matchOver }.
-    endRound(winner, reason) {
-      state.endReason = reason;
-      if (winner === 'attackers') state.scoreAtk += 1;
-      else state.scoreDef += 1;
-      award(winner === 'attackers' ? WIN_REWARD : LOSS_REWARD);
-      state.phase = 'END';
-      state.phaseLeft = END_SECONDS;
+    closeRound(winner, reason) {
+      state.endNote = reason;
+      if (winner === 'attackers') state.atkScore += 1;
+      else state.defScore += 1;
+      award(winner === 'attackers' ? WIN_PAY : LOSS_PAY);
+      state.stage = 'END';
+      state.stageLeft = END_TIME;
       const matchOver =
-        state.scoreAtk >= WIN_ROUNDS || state.scoreDef >= WIN_ROUNDS || state.round >= MAX_ROUNDS;
-      if (matchOver) state.matchWinner = state.scoreAtk > state.scoreDef ? 'attackers' : 'defenders';
+        state.atkScore >= ROUNDS_TO_WIN ||
+        state.defScore >= ROUNDS_TO_WIN ||
+        state.roundNo >= ROUND_CAP;
+      if (matchOver) {
+        state.matchVictor =
+          state.atkScore > state.defScore ? 'attackers' : 'defenders';
+      }
       return { winner, reason, matchOver };
     },
-    nextRound() {
-      if (state.matchWinner) {
-        state.phase = 'MATCH';
+    next() {
+      if (state.matchVictor) {
+        state.stage = 'MATCH';
         return false;
       }
-      state.round += 1;
-      state.phase = 'BUY';
-      state.phaseLeft = BUY_SECONDS;
-      state.endReason = '';
+      state.roundNo += 1;
+      state.stage = 'BUY';
+      state.stageLeft = BUY_TIME;
+      state.endNote = '';
       return true;
     },
-    // Buy menu: weapons by key, grenades by key. Returns a result string.
-    buy(key, weapons, grenades) {
-      if (state.phase !== 'BUY') return 'not-buy-phase';
-      const map = { Digit1: 'smg', Digit2: 'rifle', Digit3: 'marksman', Digit4: 'smoke', Digit5: 'flash' };
-      const item = map[key];
+    // Shop: weapons by key, grenades by key. Returns a result string.
+    purchase(key, arsenal, kit) {
+      if (state.stage !== 'BUY') return 'not-buy-phase';
+      const item = SHOP_KEYS[key];
       if (!item) return null;
       if (item === 'smoke' || item === 'flash') {
-        const price = item === 'smoke' ? 250 : 150;
-        if (state.money < price) return 'too-poor';
-        state.money -= price;
-        grenades.buy(item);
+        const price = GRENADE_PRICES[item];
+        if (state.cash < price) return 'too-poor';
+        state.cash -= price;
+        kit.stock(item);
         return `bought-${item}`;
       }
-      const def = WEAPON_DEFS[item];
-      if (weapons.state.owned[item]) {
-        weapons.switchTo(item);
+      const spec = GUNBOOK[item];
+      if (arsenal.state.unlocked[item]) {
+        arsenal.equip(item);
         return `switched-${item}`;
       }
-      if (state.money < def.price) return 'too-poor';
-      state.money -= def.price;
-      weapons.buy(item);
+      if (state.cash < spec.cost) return 'too-poor';
+      state.cash -= spec.cost;
+      arsenal.purchase(item);
       return `bought-${item}`;
     },
   };

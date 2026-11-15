@@ -1,23 +1,26 @@
-// The look plan, in one place: a night foundry — cold blue-grey steel and
-// concrete, molten orange glow from the furnace and lamps, slag-green
-// painted steel, pale ink for the player-readable shapes. The same names
-// are the CSS custom properties in index.html.
-export const PALETTE = {
-  night: '#0d1117', // sky / fog / page background
-  sky: '#232c3a', // hemisphere sky bounce
-  concrete: '#333a42', // foundry floor
-  wall: '#414b55', // perimeter + furnace hall walls
-  pillar: '#4d5865',
-  steel: '#5d6b7a', // gantry + lamp poles
-  crate: '#6e5b3f', // wooden crates
-  ingot: '#7a3d22', // rusted ingot stacks
-  slag: '#2e6b52', // painted steel + cool fill
-  ember: '#ff7a1a', // accent: furnace glow, site rings, HUD highlights
-  lane: '#4a545f', // painted lane strips on the floor
-  ink: '#ece7dc', // readable shapes: bodies, HUD text
-  sun: '#ff9a3d', // low furnace glow colour
-};
+// Every colour the game uses, in one table: a night foundry — cold
+// blue-grey steel and concrete, molten orange from the furnace and the
+// lamps, green painted steel, pale bone for shapes the player must read
+// at a glance. The names here mirror the CSS custom properties in
+// index.html, so the page and the scene agree on the look.
+const SWATCHES = [
+  ['abyss', '#0d1117'], // page background, fog, deep shadow
+  ['haze', '#232c3a'], // sky bounce from the hemisphere light
+  ['slab', '#333a42'], // foundry floor
+  ['bulkhead', '#414b55'], // perimeter walls and the furnace hall
+  ['column', '#4d5865'], // pillars
+  ['girder', '#5d6b7a'], // gantry steel and lamp poles
+  ['timber', '#6e5b3f'], // wooden crates
+  ['rust', '#7a3d22'], // scorched ingot stacks
+  ['moss', '#2e6b52'], // green painted steel, cool fill light
+  ['molten', '#ff7a1a'], // accent: furnace glow, site rings, HUD marks
+  ['stripe', '#4a545f'], // painted lane strips on the floor
+  ['bone', '#ece7dc'], // readable shapes: bodies, HUD text
+  ['flare', '#ff9a3d'], // low furnace-glow light colour
+];
 
-export function shade(name) {
-  return PALETTE[name];
+export const TINTS = Object.fromEntries(SWATCHES);
+
+export function tone(name) {
+  return TINTS[name];
 }

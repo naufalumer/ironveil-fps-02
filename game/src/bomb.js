@@ -1,50 +1,58 @@
 // The charge: carried by the player, planted at a site by holding E,
 // then a 35 s fuse the defenders race to defuse. The charge is one mesh
 // with a blinking light; its state lives here, the round logic lives in
-// rounds.js.
+// the match module.
 import * as THREE from 'three';
-import { SITES } from './map.js';
-import { PALETTE } from './palette.js';
+import { ZONES } from './map.js';
+import { TINTS } from './palette.js';
 
-export const PLANT_SECONDS = 3;
-export const FUSE_SECONDS = 35;
+export const PLANT_TIME = 3;
+export const FUSE_TIME = 35;
 
-export function createBomb(scene) {
+export function makeCharge(scene) {
   const group = new THREE.Group();
-  const body = new THREE.Mesh(
+  const casing = new THREE.Mesh(
     new THREE.BoxGeometry(0.34, 0.2, 0.24),
-    new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.night), roughness: 0.4, metalness: 0.6 }),
+    new THREE.MeshStandardMaterial({
+      color: new THREE.Color(TINTS.abyss),
+      roughness: 0.4,
+      metalness: 0.6,
+    }),
   );
-  const light = new THREE.Mesh(
+  const lamp = new THREE.Mesh(
     new THREE.SphereGeometry(0.045, 10, 8),
-    new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.ember) }),
+    new THREE.MeshBasicMaterial({ color: new THREE.Color(TINTS.molten) }),
   );
-  light.position.set(0.1, 0.12, 0);
-  const antenna = new THREE.Mesh(
+  lamp.position.set(0.1, 0.12, 0);
+  const aerial = new THREE.Mesh(
     new THREE.CylinderGeometry(0.008, 0.008, 0.3, 6),
-    new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.steel), roughness: 0.4, metalness: 0.7 }),
+    new THREE.MeshStandardMaterial({
+      color: new THREE.Color(TINTS.girder),
+      roughness: 0.4,
+      metalness: 0.7,
+    }),
   );
-  antenna.position.set(-0.12, 0.22, 0);
-  group.add(body, light, antenna);
+  aerial.position.set(-0.12, 0.22, 0);
+  group.add(casing, lamp, aerial);
   group.visible = false;
   scene.add(group);
 
   const state = {
-    carried: true, // on the player's back until planted
-    planted: false,
-    site: null, // 'A' | 'B'
-    plantProgress: 0,
-    fuseLeft: 0,
-    position: new THREE.Vector3(),
-    beepTimer: 0,
-    exploded: false,
+    onBack: true, // on the player's back until planted
+    set: false,
+    zone: null, // 'A' | 'B'
+    plantIn: 0,
+    fuseIn: 0,
+    pos: new THREE.Vector3(),
+    beepIn: 0,
+    blown: false,
   };
 
-  function siteAt(x, z) {
-    for (const [name, site] of Object.entries(SITES)) {
-      const dx = x - site.x;
-      const dz = z - site.z;
-      if (dx * dx + dz * dz < site.r * site.r) return name;
+  function zoneAt(x, z) {
+    for (const [name, zone] of Object.entries(ZONES)) {
+      const dx = x - zone.x;
+      const dz = z - zone.z;
+      if (dx * dx + dz * dz < zone.r * zone.r) return name;
     }
     return null;
   }
@@ -52,34 +60,34 @@ export function createBomb(scene) {
   return {
     state,
     group,
-    siteAt,
-    reset() {
-      state.carried = true;
-      state.planted = false;
-      state.site = null;
-      state.plantProgress = 0;
-      state.fuseLeft = 0;
-      state.exploded = false;
-      state.beepTimer = 0;
+    zoneAt,
+    resetCharge() {
+      state.onBack = true;
+      state.set = false;
+      state.zone = null;
+      state.plantIn = 0;
+      state.fuseIn = 0;
+      state.blown = false;
+      state.beepIn = 0;
       group.visible = false;
     },
-    // Planting: called every fixed step while the player holds E inside a site.
-    // Returns 'planted' the step the channel completes, else null.
-    plantStep(dt, playerPos, holding) {
-      if (state.planted || !state.carried) return null;
-      const site = siteAt(playerPos.x, playerPos.z);
-      if (!holding || !site) {
-        state.plantProgress = Math.max(0, state.plantProgress - dt * 2);
+    // Planting: called every fixed step while the player holds E inside a
+    // zone. Returns 'planted' the step the channel completes, else null.
+    plantTick(dt, playerPos, holding) {
+      if (state.set || !state.onBack) return null;
+      const zone = zoneAt(playerPos.x, playerPos.z);
+      if (!holding || !zone) {
+        state.plantIn = Math.max(0, state.plantIn - dt * 2);
         return null;
       }
-      state.plantProgress += dt;
-      if (state.plantProgress >= PLANT_SECONDS) {
-        state.planted = true;
-        state.carried = false;
-        state.site = site;
-        state.fuseLeft = FUSE_SECONDS;
-        state.position.set(SITES[site].x, 0.12, SITES[site].z);
-        group.position.copy(state.position);
+      state.plantIn += dt;
+      if (state.plantIn >= PLANT_TIME) {
+        state.set = true;
+        state.onBack = false;
+        state.zone = zone;
+        state.fuseIn = FUSE_TIME;
+        state.pos.set(ZONES[zone].x, 0.12, ZONES[zone].z);
+        group.position.copy(state.pos);
         group.visible = true;
         return 'planted';
       }
@@ -87,26 +95,27 @@ export function createBomb(scene) {
     },
     // Fuse countdown. Returns 'detonated' when the timer runs out.
     // Beeps accelerate as the fuse burns down; hooks.beep() plays the sound.
-    fuseStep(dt, hooks) {
-      if (!state.planted || state.exploded) return null;
-      state.fuseLeft -= dt;
-      state.beepTimer -= dt;
-      const interval = state.fuseLeft > 20 ? 1.0 : state.fuseLeft > 10 ? 0.55 : 0.28;
-      if (state.beepTimer <= 0) {
-        state.beepTimer = interval;
-        if (hooks.beep) hooks.beep(state.fuseLeft);
+    fuseTick(dt, hooks) {
+      if (!state.set || state.blown) return null;
+      state.fuseIn -= dt;
+      state.beepIn -= dt;
+      const gap = state.fuseIn > 20 ? 1.0 : state.fuseIn > 10 ? 0.55 : 0.28;
+      if (state.beepIn <= 0) {
+        state.beepIn = gap;
+        if (hooks.beep) hooks.beep(state.fuseIn);
       }
-      if (state.fuseLeft <= 0) {
-        state.exploded = true;
+      if (state.fuseIn <= 0) {
+        state.blown = true;
         return 'detonated';
       }
       return null;
     },
-    // Blink the charge light: faster as the fuse burns. Cheap: one visibility flip.
-    blink(time) {
-      if (!state.planted) return;
-      const fast = state.fuseLeft < 10 ? 0.12 : 0.5;
-      light.visible = (time % (fast * 2)) < fast;
+    // Blink the charge light: faster as the fuse burns. Cheap: one
+    // visibility flip.
+    pulseLight(time) {
+      if (!state.set) return;
+      const fast = state.fuseIn < 10 ? 0.12 : 0.5;
+      lamp.visible = time % (fast * 2) < fast;
     },
   };
 }
